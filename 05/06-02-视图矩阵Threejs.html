@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>06-视图矩阵threejs</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+
+      #canvas {
+        width: 100%;
+        height: 100%;
+        background-color: antiquewhite;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <!-- 顶点着色器 -->
+    <script id="vertexShader" type="x-shader/x-vertex">
+      attribute vec4 a_Position;
+      uniform mat4 u_ViewMatrix;
+      void main(){
+        gl_Position = u_ViewMatrix*a_Position;
+        gl_PointSize = 10.0;
+      }
+    </script>
+    <!-- 片元着色器 -->
+    <script id="fragmentShader" type="x-shader/x-fragment">
+      void main(){
+        gl_FragColor=vec4(1,1,1,1);
+      }
+    </script>
+
+    <script type="module">
+      import { initShaders } from "../jsm/Utils.js";
+      import {
+        Matrix4,
+        Vector3,
+        Quaternion,
+      } from "https://unpkg.com/three/build/three.module.js";
+
+      const canvas = document.querySelector("#canvas");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      // 获取着色器文本
+      const vsSource = document.querySelector("#vertexShader").innerText;
+      const fsSource = document.querySelector("#fragmentShader").innerText;
+
+      // 三维画笔
+      const gl = canvas.getContext("webgl");
+
+      // 初始化着色器
+      initShaders(gl, vsSource, fsSource);
+
+      const verticeLib = [
+        1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0,
+        -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, -1.0,
+      ];
+
+      const indices = [
+        0, 1, 1, 2, 2, 3, 3, 0,
+
+        0, 5, 1, 6, 2, 7, 3, 4,
+
+        4, 5, 5, 6, 6, 7, 7, 4,
+      ];
+
+      const arr = [];
+      indices.forEach((n) => {
+        const i = n * 3;
+        arr.push(
+          verticeLib[i] / 5,
+          verticeLib[i + 1] / 5,
+          verticeLib[i + 2] / 5
+        );
+      });
+      // 顶点数据
+      const vertices = new Float32Array(arr);
+      // 缓冲对象
+      const vertexBuffer = gl.createBuffer();
+      // 绑定缓冲对象
+      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+      // 写入数据
+      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+      // 获取attribute变量
+      const a_Position = gl.getAttribLocation(gl.program, "a_Position");
+      // 修改attribute变量
+      gl.vertexAttribPointer(a_Position, 3, gl.FLOAT, false, 0, 0);
+      // 赋能-批处理
+      gl.enableVertexAttribArray(a_Position);
+
+      const u_ViewMatrix = gl.getUniformLocation(gl.program, "u_ViewMatrix");
+      const matrix = new Matrix4().lookAt(
+        new Vector3(0.2, 0.2, 1),
+        new Vector3(0, 0, 0),
+        new Vector3(0, 1, 0)
+      );
+      gl.uniformMatrix4fv(u_ViewMatrix, false, matrix.elements);
+
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.LINES, 0, indices.length);
+    </script>
+  </body>
+</html>
