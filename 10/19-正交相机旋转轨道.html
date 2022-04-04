@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>正交相机旋转轨道</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+
+    #canvas {
+      width: 100%;
+      height: 100%;
+      background-color: antiquewhite;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="canvas"></canvas>
+  <!-- 顶点着色器 -->
+  <script id="vertexShader" type="x-shader/x-vertex">
+      attribute vec4 a_Position;
+      uniform mat4 u_PvMatrix;
+      uniform mat4 u_ModelMatrix;
+      void main(){
+        gl_Position = u_PvMatrix*u_ModelMatrix*a_Position;
+      }
+    </script>
+  <!-- 片元着色器 -->
+  <script id="fragmentShader" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform vec4 u_Color;
+      void main(){
+        gl_FragColor=u_Color;
+      }
+    </script>
+
+  <script type="module">
+    import { initShaders } from "../jsm/Utils.js";
+    import {
+      Matrix4,
+      Vector2,
+      Vector3,
+      Quaternion,
+      Object3D,
+      OrthographicCamera,
+      PerspectiveCamera,
+      Spherical
+    } from "https://unpkg.com/three/build/three.module.js";
+    import Poly from "./jsm/Poly.js";
+
+    const canvas = document.querySelector("#canvas");
+    const [viewW, viewH] = [window.innerWidth, window.innerHeight];
+    canvas.width = viewW;
+    canvas.height = viewH;
+    const gl = canvas.getContext("webgl");
+
+    const vsSource = document.querySelector("#vertexShader").innerText;
+    const fsSource = document.querySelector("#fragmentShader").innerText;
+    initShaders(gl, vsSource, fsSource);
+    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+
+    const halfH = 2;
+    const ratio = canvas.width / canvas.height;
+    const halfW = halfH * ratio;
+    const [left, right, top, bottom, near, far] = [
+      -halfW,
+      halfW,
+      halfH,
+      -halfH,
+      1,
+      8,
+    ];
+    const eye = new Vector3(1, 1, 2);
+    const target = new Vector3(0, 0, -3);
+    const up = new Vector3(0, 1, 0);
+
+    const camera = new OrthographicCamera(
+      left,
+      right,
+      top,
+      bottom,
+      near,
+      far
+    );
+    camera.position.copy(eye);
+    camera.lookAt(target);
+    camera.updateMatrixWorld();
+
+    //投影视图矩阵
+    const pvMatrix = new Matrix4();
+    pvMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse
+    );
+
+    const triangle1 = crtTriangle(
+      [1, 0, 0, 1],
+      [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -0.5, 0, -3, 1]
+    );
+    const triangle2 = crtTriangle(
+      [1, 0, 0, 1],
+      new Matrix4().setPosition(0.5, 0, -3).elements
+    );
+
+    const triangle3 = crtTriangle(
+      [1, 1, 0, 1],
+      new Matrix4().setPosition(-0.5, 0, -2).elements
+    );
+
+    const triangle4 = crtTriangle(
+      [1, 1, 0, 1],
+      new Matrix4().setPosition(0.5, 0, -2).elements
+    );
+
+    /* 声明基础数据 */
+    const mouseButtons = new Map([[0, 'rotate'], [2, "pan"],]);
+    let state = "none";
+    const pi2 = Math.PI * 2
+
+    /* 平移轨道 */
+    const [dragStart, dragEnd] = [new Vector2(), new Vector2()];
+    const panOffset = new Vector3();
+    const screenSpacePanning = true;
+
+    /* 缩放轨道 */
+    //滚轮在每次滚动时的缩放系数
+    const zoomScale = 0.95;
+
+    /* 旋转轨道 */
+    const spherical = new Spherical()
+      .setFromVector3(
+        camera.position.clone().sub(target)
+      )
+
+    //在canvas上绑定鼠标事件
+    canvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+    });
+    canvas.addEventListener("pointerdown", ({ clientX, clientY, button }) => {
+      dragStart.set(clientX, clientY);
+      state = mouseButtons.get(button);
+    });
+    canvas.addEventListener("pointermove", ({clientX, clientY}) => {
+      dragEnd.set(clientX, clientY)
+      switch (state) {
+        case "pan":
+          pan(dragEnd.clone().sub(dragStart))
+          break;
+        case 'rotate':
+          rotate(dragEnd.clone().sub(dragStart))
+          break
+      }
+      dragStart.copy(dragEnd)
+    });
+    canvas.addEventListener("pointerup", (event) => {
+      state = "none";
+    });
+
+    // 滚轮事件
+    canvas.addEventListener("wheel", handleMouseWheel);
+    function handleMouseWheel({ deltaY }) {
+      console.log("deltaY", deltaY);
+      if (deltaY < 0) {
+        dolly(1 / zoomScale);
+      } else {
+        dolly(zoomScale);
+      }
+      update();
+    }
+
+    function dolly(dollyScale) {
+      camera.zoom *= dollyScale;
+      camera.updateProjectionMatrix();
+    }
+
+    //平移方法
+    function pan({ x, y }) {
+      const { right, left, top, bottom, matrix, position, up } = camera;
+      const { clientWidth, clientHeight } = canvas;
+      const cameraW = right - left;
+      const cameraH = top - bottom;
+      const ratioX = x / clientWidth;
+      const ratioY = y / clientHeight;
+      const distanceLeft = ratioX * cameraW;
+      const distanceUp = ratioY * cameraH;
+      const mx = new Vector3().setFromMatrixColumn(matrix, 0);
+      const vx = mx.clone().multiplyScalar(-distanceLeft);
+      const vy = new Vector3();
+      if (screenSpacePanning) {
+        vy.setFromMatrixColumn(matrix, 1);
+      } else {
+        vy.crossVectors(up, mx);
+      }
+      vy.multiplyScalar(distanceUp);
+      panOffset.copy(vx.add(vy));
+      update();
+    }
+
+    // 旋转方法
+    function rotate({ x, y }) {
+      const { clientHeight } = canvas
+      spherical.theta -= pi2 * x / clientHeight // yes, height
+      spherical.phi -= pi2 * y / clientHeight
+      update()
+    }
+
+    function update() {
+      //基于平移量平移相机
+      target.add(panOffset)
+      camera.position.add(panOffset)
+
+      //基于旋转量旋转相机
+      const rotateOffset = new Vector3()
+        .setFromSpherical(spherical)
+      camera.position.copy(
+        target.clone().add(rotateOffset)
+      )
+
+      //更新投影视图矩阵
+      camera.lookAt(target)
+      camera.updateMatrixWorld(true)
+      pvMatrix.multiplyMatrices(
+        camera.projectionMatrix,
+        camera.matrixWorldInverse,
+      )
+
+      //重置旋转量和平移量
+      spherical.setFromVector3(
+        camera.position.clone().sub(target)
+      )
+      panOffset.set(0, 0, 0)
+
+      // 渲染
+      render()
+    }
+
+    render();
+
+    function render() {
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      triangle1.init();
+      triangle1.draw();
+      triangle2.init();
+      triangle2.draw();
+      triangle3.init();
+      triangle3.draw();
+      triangle4.init();
+      triangle4.draw();
+    }
+
+    function crtTriangle(color, modelMatrix) {
+      return new Poly({
+        gl,
+        source: [0, 0.3, 0, -0.3, -0.3, 0, 0.3, -0.3, 0],
+        type: "TRIANGLES",
+        attributes: {
+          a_Position: {
+            size: 3,
+            index: 0,
+          },
+        },
+        uniforms: {
+          u_Color: {
+            type: "uniform4fv",
+            value: color,
+          },
+          u_PvMatrix: {
+            type: "uniformMatrix4fv",
+            value: pvMatrix.elements,
+          },
+          u_ModelMatrix: {
+            type: "uniformMatrix4fv",
+            value: modelMatrix,
+          },
+        },
+      });
+    }
+  </script>
+</body>
+
+</html>
